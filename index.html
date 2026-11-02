@@ -146,7 +146,6 @@ function unlockAudio(){
     AC.resume();
     const s=AC.createBufferSource();s.buffer=AC.createBuffer(1,1,22050);
     s.connect(AC.destination);s.start(0)}
-  if(!shown){shown=true;setTimeout(()=>alert('v4 - audio: '+AC.state+' - session: '+(navigator.audioSession?navigator.audioSession.type:'non dispo')),600)}}
 ['touchend','click'].forEach(ev=>addEventListener(ev,unlockAudio));
 document.getElementById('clear').addEventListener('click',()=>{hCount=hHead=textRevealed=clicks=0;rings.length=0});
 
