@@ -128,12 +128,25 @@ cv.addEventListener('pointerdown',e=>{e.preventDefault();
   if(AC){play(S.boom[clicks%3],.9,rnd(.9,1.1));play(S.bell[clicks%6],.5)}
   clicks++;
   if(done){play(S.chord,.7);addRing(tcx,tcy,.7*Math.max(W,H),'255,215,150')}});
-  function unlockAudio(){
+  let silentEl=null,shown=false;
+function silentWav(){
+  const n=800,b=new ArrayBuffer(44+n),v=new DataView(b);
+  const s=(o,t)=>{for(let i=0;i<t.length;i++)v.setUint8(o+i,t.charCodeAt(i))};
+  s(0,'RIFF');v.setUint32(4,36+n,true);s(8,'WAVEfmt ');v.setUint32(16,16,true);
+  v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,8000,true);v.setUint32(28,8000,true);
+  v.setUint16(32,1,true);v.setUint16(34,8,true);s(36,'data');v.setUint32(40,n,true);
+  new Uint8Array(b,44).fill(128);
+  return URL.createObjectURL(new Blob([b],{type:'audio/wav'}))}
+function unlockAudio(){
+  try{if(navigator.audioSession)navigator.audioSession.type='playback'}catch(e){}
   if(!AC)initAudio();
-  if(AC&&AC.state!=='running'){
+  if(!AC)return;
+  if(!silentEl){silentEl=new Audio(silentWav());silentEl.loop=true;silentEl.play().catch(()=>{})}
+  if(AC.state!=='running'){
     AC.resume();
     const s=AC.createBufferSource();s.buffer=AC.createBuffer(1,1,22050);
-    s.connect(AC.destination);s.start(0)}}
+    s.connect(AC.destination);s.start(0)}
+  if(!shown){shown=true;setTimeout(()=>alert('v4 - audio: '+AC.state+' - session: '+(navigator.audioSession?navigator.audioSession.type:'non dispo')),600)}}
 ['touchend','click'].forEach(ev=>addEventListener(ev,unlockAudio));
 document.getElementById('clear').addEventListener('click',()=>{hCount=hHead=textRevealed=clicks=0;rings.length=0});
 
