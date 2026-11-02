@@ -128,6 +128,13 @@ cv.addEventListener('pointerdown',e=>{e.preventDefault();
   if(AC){play(S.boom[clicks%3],.9,rnd(.9,1.1));play(S.bell[clicks%6],.5)}
   clicks++;
   if(done){play(S.chord,.7);addRing(tcx,tcy,.7*Math.max(W,H),'255,215,150')}});
+  function unlockAudio(){
+  if(!AC)initAudio();
+  if(AC&&AC.state!=='running'){
+    AC.resume();
+    const s=AC.createBufferSource();s.buffer=AC.createBuffer(1,1,22050);
+    s.connect(AC.destination);s.start(0)}}
+['touchend','click'].forEach(ev=>addEventListener(ev,unlockAudio));
 document.getElementById('clear').addEventListener('click',()=>{hCount=hHead=textRevealed=clicks=0;rings.length=0});
 
 /* ---------- boucle ---------- */
