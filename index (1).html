@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0a0414">
+<meta name="apple-mobile-web-app-title" content="Coeurs">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+
+<title>Je t’aime Myrlande</title>
+<style>
+:root{--bg:#0a0414;--fg:#fff;--pill:rgba(255,255,255,.14);--pill-b:rgba(255,255,255,.28)}
+html,body{margin:0;height:100%;background:var(--bg);overflow:hidden;overscroll-behavior:none;
+  -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent}
+canvas{position:fixed;inset:0;width:100%;height:100%;touch-action:none;display:block}
+#clear{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 18px);
+  min-height:44px;padding:0 28px;border-radius:22px;border:1px solid var(--pill-b);background:var(--pill);
+  color:var(--fg);font:600 16px/1 system-ui,-apple-system,sans-serif;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+#clear:active{background:var(--pill-b)}
+#tm{position:fixed;left:50%;top:calc(env(safe-area-inset-top,0px) + 8px);transform:translateX(-50%);
+  width:min(92vw,420px);box-sizing:border-box;padding:8px 10px;border-radius:14px;
+  background:rgba(10,4,20,.45);border:1px solid rgba(255,255,255,.12);
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);text-align:center;color:var(--fg);
+  font-family:system-ui,-apple-system,sans-serif;opacity:0;pointer-events:none;transition:opacity .8s}
+#tm.on{opacity:1;pointer-events:auto}
+#tc{font-size:10px;opacity:.6;letter-spacing:.03em}
+#tv{font-size:13px;font-weight:600;margin:3px 0 6px;line-height:1.3;font-variant-numeric:tabular-nums}
+#tb{display:flex;flex-wrap:wrap;justify-content:center;gap:4px}
+#tb button{min-height:28px;padding:0 8px;border-radius:14px;border:1px solid rgba(255,255,255,.25);
+  background:rgba(255,255,255,.08);color:#fff;font:600 11px/1 system-ui,-apple-system,sans-serif}
+#tb button.sel{background:rgba(255,255,255,.28)}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="tm">
+  <div id="tc">Depuis le 27 juin 2024 à 21 h</div>
+  <div id="tv"></div>
+  <div id="tb">
+    <button data-m="date" class="sel">Date</button>
+    <button data-m="mois">Mois</button>
+    <button data-m="jours">Jours</button>
+    <button data-m="heures">Heures</button>
+    <button data-m="minutes">Min</button>
+    <button data-m="secondes">Sec</button>
+    <button data-m="ms">Ms</button>
+  </div>
+</div>
+<button id="clear">Rejouer</button>
+<script>
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+const TEXT_MAX=3600,MAX_HEART=9000,N=TEXT_MAX+MAX_HEART,PER_CLICK=1100,CLICKS=6;
+const BURST=.3,ATT=50,DRAG=5.5,PERIOD=1.15,AMP=.07,QS=1.5/1.14,TAU=Math.PI*2;
+const rnd=(a,b)=>a+(b-a)*Math.random();
+const F=()=>new Float32Array(N);
+const px=F(),py=F(),vx=F(),vy=F(),tx=F(),ty=F(),age=F(),sz=F(),ph=F(),al=F(),ci=new Uint8Array(N);
+let textRevealed=0,hCount=0,hHead=0,clicks=0,hint=1,started=false;
+
+/* ---------- sprites (coeur doux avec halo, une teinte par couleur) ---------- */
+function hsv(h,s,v){h=(((h%360)+360)%360)/60;const i=Math.floor(h),f=h-i,p=v*(1-s),q=v*(1-s*f),t=v*(1-s*(1-f));
+  return [[v,t,p],[q,v,p],[p,v,t],[p,q,v],[t,p,v],[v,p,q]][i%6].map(x=>Math.round(x*255))}
+function sprite(rgb){const S=48,c=document.createElement('canvas');c.width=c.height=S;
+  const g=c.getContext('2d'),im=g.createImageData(S,S);
+  for(let j=0;j<S;j++)for(let i=0;i<S;i++){
+    const x=((i+.5)/S*2-1)*1.5,y=-((j+.5)/S*2-1)*1.5+.125,a=x*x+y*y-1,f=a*a*a-x*x*y*y*y;
+    const A=f<0?.75+.25*Math.min(-f,1):.75*Math.exp(-f*18),k=(j*S+i)*4;
+    im.data[k]=rgb[0];im.data[k+1]=rgb[1];im.data[k+2]=rgb[2];im.data[k+3]=A*255}
+  g.putImageData(im,0,0);return c}
+const spr=[];
+for(let i=0;i<10;i++)spr.push(sprite(hsv(-35+i*5.5,.75,1)));   // 0-9 coeurs
+spr.push(sprite(hsv(0,.12,1)));                                 // 10 etincelle
+[335,345,355].forEach(h=>spr.push(sprite(hsv(h,.3,1))));        // 11-13 texte
+
+/* ---------- phrase : echantillonnage d'un vrai texte lisse ---------- */
+const tX=[],tY=[];let textTotal=0,tHW=1,tHH=1;
+(function(){const c=document.createElement('canvas');c.width=520;c.height=220;
+  const g=c.getContext('2d');g.fillStyle='#fff';g.textAlign='center';g.textBaseline='middle';
+  g.font='800 64px system-ui,-apple-system,"Helvetica Neue",sans-serif';
+  g.fillText('Je t’aime',260,72);g.fillText('Myrlande',260,148);
+  const d=g.getImageData(0,0,520,220).data,pts=[];
+  for(let y=0;y<220;y+=3)for(let x=0;x<520;x+=3)if(d[(y*520+x)*4+3]>128)pts.push([(x-260)/64,(y-110)/64]);
+  for(let i=pts.length-1;i>0;i--){const j=Math.random()*(i+1)|0;[pts[i],pts[j]]=[pts[j],pts[i]]}
+  pts.length=Math.min(pts.length,TEXT_MAX);textTotal=pts.length;
+  for(const p of pts){tX.push(p[0]);tY.push(p[1]);tHW=Math.max(tHW,Math.abs(p[0]));tHH=Math.max(tHH,Math.abs(p[1]))}})();
+
+/* ---------- mise en page adaptative ---------- */
+let W,H,DPR,hs,hcx,hcy,ts,tcx,tcy,hss,tss;
+function layout(){DPR=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight;
+  cv.width=W*DPR;cv.height=H*DPR;
+  hs=Math.min(.36*W,.27*H);hcx=W/2;hcy=H*.33;
+  ts=Math.min(.88*W/(2*tHW),.26*H/(2*tHH));tcx=W/2;tcy=H*.76;
+  hss=hs/150;tss=ts*3/64}
+addEventListener('resize',layout);layout();
+
+/* ---------- particules ---------- */
+function heartPt(){for(;;){const x=rnd(-1.15,1.15),y=rnd(-1.05,1.3),a=x*x+y*y-1;
+  if(a*a*a-x*x*y*y*y<=0)return[x,-(y-.125)]}}
+function launch(i,ox,oy,ss,X,Y,size,c,a){const an=rnd(0,TAU),sp=rnd(200,700)*ss;
+  px[i]=ox;py[i]=oy;vx[i]=Math.cos(an)*sp;vy[i]=Math.sin(an)*sp;tx[i]=X;ty[i]=Y;
+  age[i]=0;sz[i]=size;ph[i]=rnd(0,TAU);ci[i]=c;al[i]=a}
+function explode(ox,oy){
+  for(let k=0;k<PER_CLICK;k++){let idx;if(hCount<MAX_HEART)idx=hCount++;else{idx=hHead;hHead=(hHead+1)%MAX_HEART}
+    const [X,Y]=heartPt(),spark=Math.random()<.06;
+    launch(TEXT_MAX+idx,ox,oy,hss,X,Y,rnd(2,4.6),spark?10:Math.random()*10|0,spark?.6:rnd(.3,.6))}
+  const chunk=Math.ceil(textTotal/CLICKS),end=Math.min(textRevealed+chunk,textTotal),done=textRevealed<textTotal&&end===textTotal;
+  for(let j=textRevealed;j<end;j++)launch(j,ox,oy,hss,tX[j],tY[j],rnd(.6,.9),11+(Math.random()*3|0),rnd(.6,.8));
+  textRevealed=end;return done}
+function update(a,b,cx,cy,sc,dt,drag){for(let i=a;i<b;i++){
+  const r=Math.min(age[i]/BURST,1),k=ATT*r*r*(3-2*r);
+  vx[i]=(vx[i]+(cx+tx[i]*sc-px[i])*k*dt)*drag;vy[i]=(vy[i]+(cy+ty[i]*sc-py[i])*k*dt)*drag;
+  px[i]+=vx[i]*dt;py[i]+=vy[i]*dt;age[i]+=dt}}
+function drawRange(a,b,cx,cy,beat,ss,tt,fl){for(let i=a;i<b;i++){
+  ctx.globalAlpha=Math.min(al[i]*(.75+.25*Math.sin(tt+ph[i]))*fl,1);
+  const h=sz[i]*ss*QS*beat;
+  ctx.drawImage(spr[ci[i]],cx+(px[i]-cx)*beat-h,cy+(py[i]-cy)*beat-h,2*h,2*h)}}
+
+/* ---------- anneaux ---------- */
+const rings=[];
+const addRing=(x,y,R,col)=>{rings.push({x,y,R,col,t:0});if(rings.length>8)rings.shift()};
+
+/* ---------- audio synthetise (WebAudio) ---------- */
+let AC,S={};
+const NOTES=[523.25,587.33,659.25,783.99,880,1046.5];
+function mk(sec,fn){const sr=AC.sampleRate,n=sec*sr|0,b=AC.createBuffer(1,n,sr),d=b.getChannelData(0);
+  for(let i=0;i<n;i++)d[i]=fn(i/sr,i);for(let i=0;i<220;i++)d[n-1-i]*=i/220;return b}
+function boom(){let ph=0,lp=0;const pf=[],pt=[];for(let k=0;k<6;k++){pf.push(rnd(1800,4800));pt.push(rnd(0,.18))}
+  const sr=AC.sampleRate;
+  return mk(.55,t=>{ph+=TAU*(40+130*Math.exp(-t*22))/sr;lp+=.25*((Math.random()*2-1)-lp);
+    let v=Math.sin(ph)*Math.exp(-t*6.5)+lp*Math.exp(-t*32)*.7;
+    for(let k=0;k<6;k++){const u=t-pt[k];if(u>0)v+=Math.sin(TAU*pf[k]*u)*Math.exp(-u*18)*.08}
+    return Math.tanh(v*1.3)*Math.min(t*400,1)})}
+function bell(fr,dur,dec){const g=.5/Math.sqrt(fr.length);
+  return mk(dur,t=>{let v=0;for(const f of fr){const w=TAU*f*t;
+    v+=Math.sin(w)*Math.exp(-t*dec)+.35*Math.sin(w*2.76)*Math.exp(-t*dec*1.9)+.12*Math.sin(w*5.4)*Math.exp(-t*dec*3.2)}
+    return v*g*Math.min(t*300,1)})}
+function thump(f,dur,dec){let ph=0;const sr=AC.sampleRate;
+  return mk(dur,t=>{ph+=TAU*f*(1+.6*Math.exp(-t*35))/sr;
+    return(Math.sin(ph)+.3*Math.sin(2*ph))*Math.exp(-t*dec)*Math.min(t*250,1)*.9})}
+function initAudio(){try{AC=new(window.AudioContext||window.webkitAudioContext)();AC.resume();
+  S.boom=[boom(),boom(),boom()];S.bell=NOTES.map(f=>bell([f],1.3,3));
+  S.chord=bell([523.25,659.25,783.99,1046.5],2.8,1.6);S.lub=thump(58,.3,12);S.dub=thump(72,.22,16)}catch(e){AC=null}}
+function play(b,vol,rate=1){if(!AC||!b)return;const s=AC.createBufferSource(),g=AC.createGain();
+  s.buffer=b;s.playbackRate.value=rate;g.gain.value=vol;s.connect(g).connect(AC.destination);s.start()}
+
+/* ---------- entrees ---------- */
+cv.addEventListener('pointerdown',e=>{e.preventDefault();
+  if(!AC)initAudio();else if(AC.state==='suspended')AC.resume();
+  started=true;const done=explode(e.clientX,e.clientY);
+  addRing(e.clientX,e.clientY,.6*Math.min(W,H),'255,120,160');
+  if(AC){play(S.boom[clicks%3],.9,rnd(.9,1.1));play(S.bell[clicks%6],.5)}
+  clicks++;
+  if(done){play(S.chord,.7);addRing(tcx,tcy,.7*Math.max(W,H),'255,215,150');showTimer()}});
+  let silentEl=null,shown=false;
+function silentWav(){
+  const n=800,b=new ArrayBuffer(44+n),v=new DataView(b);
+  const s=(o,t)=>{for(let i=0;i<t.length;i++)v.setUint8(o+i,t.charCodeAt(i))};
+  s(0,'RIFF');v.setUint32(4,36+n,true);s(8,'WAVEfmt ');v.setUint32(16,16,true);
+  v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,8000,true);v.setUint32(28,8000,true);
+  v.setUint16(32,1,true);v.setUint16(34,8,true);s(36,'data');v.setUint32(40,n,true);
+  new Uint8Array(b,44).fill(128);
+  return URL.createObjectURL(new Blob([b],{type:'audio/wav'}))}
+function unlockAudio(){
+  try{if(navigator.audioSession)navigator.audioSession.type='playback'}catch(e){}
+  if(!AC)initAudio();
+  if(!AC)return;
+  if(!silentEl){silentEl=new Audio(silentWav());silentEl.loop=true;silentEl.play().catch(()=>{})}
+  if(AC.state!=='running'){
+    AC.resume();
+    const s=AC.createBufferSource();s.buffer=AC.createBuffer(1,1,22050);
+    s.connect(AC.destination);s.start(0)}
+  }
+['touchend','click'].forEach(ev=>addEventListener(ev,unlockAudio));
+document.getElementById('clear').addEventListener('click',()=>{hCount=hHead=textRevealed=clicks=0;rings.length=0;hideTimer()});
+
+/* ---------- timer ---------- */
+const START=new Date(2024,5,27,21,0,0,0);
+const tmEl=document.getElementById('tm'),tvEl=document.getElementById('tv');
+let tmOn=false,tmMode='date',tmLast=0,tmTimer=0;
+const fmt=(x,d)=>x.toLocaleString('fr-FR',{minimumFractionDigits:d,maximumFractionDigits:d});
+const anchor=n=>new Date(2024,5+n,27,21,0,0,0);
+function tickTimer(){
+  const now=new Date(),total=now-START;
+  let n=(now.getFullYear()-START.getFullYear())*12+now.getMonth()-START.getMonth();
+  if(anchor(n)>now)n--;
+  const a=anchor(n),nx=anchor(n+1);
+  let t;
+  switch(tmMode){
+    case 'mois':t=fmt(n+(now-a)/(nx-a),6)+' mois';break;
+    case 'jours':t=fmt(total/864e5,6)+' jours';break;
+    case 'heures':t=fmt(total/36e5,5)+' heures';break;
+    case 'minutes':t=fmt(total/6e4,4)+' minutes';break;
+    case 'secondes':t=fmt(total/1e3,3)+' secondes';break;
+    case 'ms':t=fmt(total,0)+' millisecondes';break;
+    default:{
+      let r=now-a;
+      const d=r/864e5|0;r-=d*864e5;
+      const h=r/36e5|0;r-=h*36e5;
+      const mi=r/6e4|0;r-=mi*6e4;
+      const s=r/1e3|0,m=r%1e3;
+      const y=n/12|0;
+      t=y+(y>1?' ans':' an')+' · '+n%12+' mois · '+d+' j · '+h+' h · '+mi+' min · '+s+' s · '+m+' ms'}}
+  tvEl.textContent=t}
+function showTimer(){clearTimeout(tmTimer);tmTimer=setTimeout(()=>{tmOn=true;tickTimer();tmEl.classList.add('on')},1800)}
+function hideTimer(){clearTimeout(tmTimer);tmOn=false;tmEl.classList.remove('on')}
+document.querySelectorAll('#tb button').forEach(b=>b.addEventListener('click',()=>{
+  tmMode=b.dataset.m;
+  document.querySelectorAll('#tb button').forEach(x=>x.classList.toggle('sel',x===b));
+  tickTimer()}));
+
+/* ---------- boucle ---------- */
+const beatF=t=>{const u=(t%PERIOD)/PERIOD,a=(u-.12)/.09,b=(u-.34)/.09;return Math.exp(-a*a)+.6*Math.exp(-b*b)};
+const crossed=(a,b,x)=>b>=a?(a<x&&x<=b):(a<x||x<=b);
+let last=0,lastU=0;
+function frame(ms){requestAnimationFrame(frame);
+  const now=ms/1000,dt=Math.min(Math.max(now-last,0),1/30);last=now;
+  const drag=Math.exp(-DRAG*dt);
+  update(0,textRevealed,tcx,tcy,ts,dt,drag);update(TEXT_MAX,TEXT_MAX+hCount,hcx,hcy,hs,dt,drag);
+  for(const r of rings)r.t+=dt/.6;
+  const u=(now%PERIOD)/PERIOD;
+  if(AC&&(hCount||textRevealed)){if(crossed(lastU,u,.12))play(S.lub,.8);if(crossed(lastU,u,.34))play(S.dub,.55)}
+  lastU=u;
+  if(tmOn&&ms-tmLast>50){tmLast=ms;tickTimer()}
+  if(started&&hint>0)hint=Math.max(hint-dt*2.5,0);
+
+  const pulse=beatF(now),bH=1+AMP*pulse,bT=1+.4*AMP*pulse;
+  ctx.setTransform(DPR,0,0,DPR,0,0);ctx.globalCompositeOperation='source-over';ctx.globalAlpha=1;
+  const g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,`rgb(${16+30*pulse|0},6,30)`);g.addColorStop(1,'rgb(4,2,10)');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+
+  if(hint>0){const fs=Math.min(.06*W,.08*H);ctx.font=`600 ${fs}px system-ui,-apple-system,sans-serif`;
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillStyle=`rgba(255,255,255,${.3*hint*(.75+.25*Math.sin(now*2.5))})`;ctx.fillText('clique ici plusieurs fois',W/2,H/2)}
+
+  ctx.globalCompositeOperation='lighter';
+  for(let i=rings.length-1;i>=0;i--){const r=rings[i];if(r.t>=1){rings.splice(i,1);continue}
+    const e=1-Math.pow(1-r.t,3);ctx.globalAlpha=1;ctx.strokeStyle=`rgba(${r.col},${.8*(1-r.t)})`;
+    ctx.lineWidth=Math.max(1.5,.004*Math.min(W,H)*2);ctx.beginPath();ctx.arc(r.x,r.y,r.R*(.03+.97*e),0,TAU);ctx.stroke()}
+  const tt=now*6,fl=1+.35*pulse;
+  drawRange(0,textRevealed,tcx,tcy,bT,tss,tt,fl);
+  drawRange(TEXT_MAX,TEXT_MAX+hCount,hcx,hcy,bH,hss,tt,fl);
+  ctx.globalAlpha=1}
+requestAnimationFrame(frame);
+if("serviceWorker"in navigator)navigator.serviceWorker.register("sw.js").catch(()=>{});
+</script>
+</body>
+</html>
